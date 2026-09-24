@@ -4,7 +4,9 @@ import {
   Award,
   BarChart3,
   Bell,
+  Bookmark,
   BookOpen,
+  BriefcaseBusiness,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -57,6 +59,7 @@ type Page =
   | "tasks"
   | "chat"
   | "initiatives"
+  | "opportunities"
   | "teams"
   | "projects"
   | "calendar"
@@ -107,6 +110,22 @@ type Initiative = {
   status: InitiativeStatus;
   votes: string[];
   createdAt: string;
+};
+
+type OpportunityCategory = "Стажировка" | "Обучение" | "Конкурс" | "Волонтёрство" | "Грант";
+type Opportunity = {
+  id: number;
+  title: string;
+  organizer: string;
+  description: string;
+  category: OpportunityCategory;
+  format: string;
+  location: string;
+  deadline: string;
+  seats: number;
+  skills: string[];
+  savedBy: string[];
+  applications: { username: string; motivation: string; createdAt: string }[];
 };
 
 const CHAIR_NAME = "Председатель парламента";
@@ -257,6 +276,7 @@ const nav: { id: Page; label: string; icon: typeof House }[] = [
   { id: "tasks", label: "Задачи", icon: CheckCircle2 },
   { id: "chat", label: "Коммуникация", icon: MessageSquare },
   { id: "initiatives", label: "Инициативы", icon: Lightbulb },
+  { id: "opportunities", label: "Возможности", icon: BriefcaseBusiness },
   { id: "teams", label: "Команды", icon: Users },
   { id: "projects", label: "Проекты", icon: FolderKanban },
   { id: "calendar", label: "Календарь", icon: CalendarDays },
@@ -312,6 +332,79 @@ const initialInitiatives: Initiative[] = [
   },
 ];
 
+const initialOpportunities: Opportunity[] = [
+  {
+    id: 5,
+    title: "Школа молодых управленцев",
+    organizer: "Молодёжный парламент",
+    description: "Практическая программа по проектному управлению, публичным коммуникациям и работе с командой.",
+    category: "Обучение",
+    format: "Очно + онлайн",
+    location: "Луганск",
+    deadline: hoursFromNow(240),
+    seats: 30,
+    skills: ["Лидерство", "Проекты", "Коммуникации"],
+    savedBy: ["member01"],
+    applications: [],
+  },
+  {
+    id: 4,
+    title: "Стажировка в проектном офисе",
+    organizer: "Региональный проектный офис",
+    description: "Работа с реальными общественными проектами под руководством наставника в течение шести недель.",
+    category: "Стажировка",
+    format: "Очно",
+    location: "Луганск",
+    deadline: hoursFromNow(144),
+    seats: 12,
+    skills: ["Аналитика", "Документы", "Команда"],
+    savedBy: ["member02", "member03"],
+    applications: [],
+  },
+  {
+    id: 3,
+    title: "Конкурс муниципальных инициатив",
+    organizer: "Совет муниципалитетов",
+    description: "Отбор решений для городской среды, молодёжного досуга и развития территорий с экспертной поддержкой.",
+    category: "Конкурс",
+    format: "Онлайн-отбор",
+    location: "Вся Республика",
+    deadline: hoursFromNow(360),
+    seats: 50,
+    skills: ["Проектирование", "Презентация"],
+    savedBy: [],
+    applications: [],
+  },
+  {
+    id: 2,
+    title: "Волонтёрский корпус форума",
+    organizer: "Ресурсный центр добровольчества",
+    description: "Команда сопровождения молодёжного форума: регистрация, навигация участников и медиаподдержка.",
+    category: "Волонтёрство",
+    format: "Очно",
+    location: "Алчевск",
+    deadline: hoursFromNow(96),
+    seats: 40,
+    skills: ["События", "Сервис", "Медиа"],
+    savedBy: ["member01", "member04"],
+    applications: [],
+  },
+  {
+    id: 1,
+    title: "Мини-гранты «Точка действия»",
+    organizer: "Фонд молодёжных проектов",
+    description: "Финансовая и методическая поддержка локальных инициатив с бюджетом до 150 000 рублей.",
+    category: "Грант",
+    format: "Проектная заявка",
+    location: "Вся Республика",
+    deadline: hoursFromNow(480),
+    seats: 20,
+    skills: ["Бюджет", "Заявка", "Социальный эффект"],
+    savedBy: ["member05"],
+    applications: [],
+  },
+];
+
 function countdown(dueAt: string, done = false) {
   if (done) return "Завершено";
   const hours = Math.round(
@@ -347,6 +440,10 @@ function App() {
   const [initiatives, setInitiatives] = useState<Initiative[]>(() => {
     const saved = localStorage.getItem("mp-initiatives-v1");
     return saved ? JSON.parse(saved) : initialInitiatives;
+  });
+  const [opportunities, setOpportunities] = useState<Opportunity[]>(() => {
+    const saved = localStorage.getItem("mp-opportunities-v1");
+    return saved ? JSON.parse(saved) : initialOpportunities;
   });
   const [notices, setNotices] = useState<Notice[]>([
     {
@@ -387,6 +484,10 @@ function App() {
   useEffect(
     () => localStorage.setItem("mp-initiatives-v1", JSON.stringify(initiatives)),
     [initiatives],
+  );
+  useEffect(
+    () => localStorage.setItem("mp-opportunities-v1", JSON.stringify(opportunities)),
+    [opportunities],
   );
   useEffect(
     () =>
@@ -518,6 +619,43 @@ function App() {
       }),
     );
     setToast("Статус инициативы обновлён");
+  };
+
+  const toggleSavedOpportunity = (id: number) => {
+    setOpportunities((current) =>
+      current.map((opportunity) => {
+        if (opportunity.id !== id) return opportunity;
+        const isSaved = opportunity.savedBy.includes(currentAccount.username);
+        return {
+          ...opportunity,
+          savedBy: isSaved
+            ? opportunity.savedBy.filter((username) => username !== currentAccount.username)
+            : [...opportunity.savedBy, currentAccount.username],
+        };
+      }),
+    );
+  };
+
+  const applyToOpportunity = (id: number, motivation: string) => {
+    setOpportunities((current) =>
+      current.map((opportunity) => {
+        if (opportunity.id !== id || opportunity.applications.some((item) => item.username === currentAccount.username)) {
+          return opportunity;
+        }
+        return {
+          ...opportunity,
+          applications: [
+            ...opportunity.applications,
+            { username: currentAccount.username, motivation, createdAt: new Date().toISOString() },
+          ],
+        };
+      }),
+    );
+    setNotices((current) => [
+      { id: Date.now(), title: "Заявка отправлена", detail: "Организатор рассмотрит отклик и свяжется с вами", read: false, kind: "message" },
+      ...current,
+    ]);
+    setToast("Заявка на возможность отправлена");
   };
 
   const submitResult = (task: Task) => {
@@ -804,6 +942,14 @@ function App() {
               onCreate={() => setInitiativeOpen(true)}
               onVote={voteForInitiative}
               onAdvance={advanceInitiative}
+            />
+          )}
+          {page === "opportunities" && (
+            <OpportunitiesPage
+              opportunities={opportunities}
+              username={currentAccount.username}
+              onSave={toggleSavedOpportunity}
+              onApply={applyToOpportunity}
             />
           )}
           {page === "teams" && <TeamsPage />}
@@ -1965,6 +2111,101 @@ function CreateInitiative({ onClose, onSubmit }: { onClose: () => void; onSubmit
         </div>
         <footer><button type="button" className="secondary" onClick={onClose}>Отмена</button><button type="submit" className="primary"><Send size={16} />Добавить идею</button></footer>
       </form>
+    </div>
+  );
+}
+
+function OpportunitiesPage({
+  opportunities,
+  username,
+  onSave,
+  onApply,
+}: {
+  opportunities: Opportunity[];
+  username: string;
+  onSave: (id: number) => void;
+  onApply: (id: number, motivation: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("Все");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selected = opportunities.find((item) => item.id === selectedId) || null;
+  const categories = ["Все", "Мои заявки", "Сохранённые", "Стажировка", "Обучение", "Конкурс", "Волонтёрство", "Грант"];
+  const filtered = opportunities.filter((opportunity) => {
+    const matchesQuery = `${opportunity.title} ${opportunity.organizer} ${opportunity.skills.join(" ")}`.toLowerCase().includes(query.toLowerCase());
+    if (!matchesQuery) return false;
+    if (filter === "Мои заявки") return opportunity.applications.some((item) => item.username === username);
+    if (filter === "Сохранённые") return opportunity.savedBy.includes(username);
+    return filter === "Все" || opportunity.category === filter;
+  });
+  const appliedCount = opportunities.filter((item) => item.applications.some((application) => application.username === username)).length;
+  const savedCount = opportunities.filter((item) => item.savedBy.includes(username)).length;
+  return (
+    <>
+      <PageTitle
+        eyebrow="Персональная траектория"
+        title="Возможности"
+        text="Стажировки, конкурсы, гранты, обучение и добровольчество в одном каталоге."
+      />
+      <section className="opportunity-hero">
+        <div><span className="eyebrow"><Sparkles size={15} /> Подборка для вас</span><h2>Найдите следующий шаг для развития</h2><p>Сохраняйте интересные предложения и отправляйте заявки прямо из цифрового штаба.</p></div>
+        <div className="opportunity-metrics"><span><strong>{opportunities.length}</strong>актуальных возможностей</span><span><strong>{appliedCount}</strong>моих заявок</span><span><strong>{savedCount}</strong>сохранено</span></div>
+      </section>
+      <div className="opportunity-controls">
+        <label className="catalog-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по названию, организатору или навыку" /></label>
+        <div className="opportunity-filters">{categories.map((category) => <button key={category} className={filter === category ? "active" : ""} onClick={() => setFilter(category)}>{category}</button>)}</div>
+      </div>
+      <div className="opportunity-grid">
+        {filtered.map((opportunity) => {
+          const saved = opportunity.savedBy.includes(username);
+          const applied = opportunity.applications.some((item) => item.username === username);
+          return (
+            <article className="opportunity-card" key={opportunity.id}>
+              <header><span className={`opportunity-category category-${opportunity.category.toLowerCase()}`}>{opportunity.category}</span><button className={saved ? "saved" : ""} onClick={() => onSave(opportunity.id)} title="Сохранить"><Bookmark fill={saved ? "currentColor" : "none"} /></button></header>
+              <div className="opportunity-logo"><BriefcaseBusiness /></div>
+              <small>{opportunity.organizer}</small>
+              <h3>{opportunity.title}</h3>
+              <p>{opportunity.description}</p>
+              <div className="opportunity-meta"><span><MapPin />{opportunity.location}</span><span><Clock3 />{countdown(opportunity.deadline)}</span></div>
+              <div className="opportunity-skills">{opportunity.skills.map((skill) => <span key={skill}>{skill}</span>)}</div>
+              <footer><span>{opportunity.seats} мест</span><button className={applied ? "applied" : ""} onClick={() => setSelectedId(opportunity.id)}>{applied ? "Заявка отправлена" : "Подробнее"}<ChevronRight /></button></footer>
+            </article>
+          );
+        })}
+      </div>
+      {!filtered.length && <div className="empty-state panel"><Search /><strong>Ничего не найдено</strong><span>Попробуйте изменить запрос или выбрать другую категорию.</span><button className="secondary" onClick={() => { setQuery(""); setFilter("Все"); }}>Сбросить фильтры</button></div>}
+      {selected && <OpportunityDialog opportunity={selected} username={username} onClose={() => setSelectedId(null)} onApply={onApply} onSave={onSave} />}
+    </>
+  );
+}
+
+function OpportunityDialog({
+  opportunity,
+  username,
+  onClose,
+  onApply,
+  onSave,
+}: {
+  opportunity: Opportunity;
+  username: string;
+  onClose: () => void;
+  onApply: (id: number, motivation: string) => void;
+  onSave: (id: number) => void;
+}) {
+  const applied = opportunity.applications.some((item) => item.username === username);
+  const saved = opportunity.savedBy.includes(username);
+  return (
+    <div className="overlay" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <div className="modal opportunity-dialog">
+        <header><div><span className="eyebrow">{opportunity.category}</span><h2>{opportunity.title}</h2></div><button onClick={onClose}><X /></button></header>
+        <div className="opportunity-detail">
+          <div className="opportunity-detail-meta"><span><BriefcaseBusiness />{opportunity.organizer}</span><span><MapPin />{opportunity.location} · {opportunity.format}</span><span><Clock3 />{countdown(opportunity.deadline)}</span><span><Users />{opportunity.seats} мест</span></div>
+          <h3>О возможности</h3><p>{opportunity.description}</p>
+          <h3>Что вы сможете развить</h3><div className="opportunity-skills">{opportunity.skills.map((skill) => <span key={skill}>{skill}</span>)}</div>
+          {applied ? <div className="application-success"><CheckCircle2 /><div><strong>Заявка отправлена</strong><span>Отклик сохранён. Следите за уведомлениями организатора.</span></div></div> : <form className="application-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); onApply(opportunity.id, String(data.get("motivation"))); }}><label>Почему вам интересна эта возможность?<textarea name="motivation" required minLength={20} rows={4} placeholder="Коротко опишите мотивацию и полезный опыт" /></label><button className="primary"><Send size={16} />Отправить заявку</button></form>}
+        </div>
+        <footer><button className="secondary" onClick={() => onSave(opportunity.id)}><Bookmark size={16} fill={saved ? "currentColor" : "none"} />{saved ? "Сохранено" : "Сохранить"}</button><button className="secondary" onClick={onClose}>Закрыть</button></footer>
+      </div>
     </div>
   );
 }
