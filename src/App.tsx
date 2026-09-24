@@ -38,6 +38,8 @@ import {
   EyeOff,
   LockKeyhole,
   LogOut,
+  Lightbulb,
+  MapPin,
   Moon,
   Sun,
 } from "lucide-react";
@@ -54,6 +56,7 @@ type Page =
   | "home"
   | "tasks"
   | "chat"
+  | "initiatives"
   | "teams"
   | "projects"
   | "calendar"
@@ -92,6 +95,20 @@ type Notice = {
   kind: "task" | "message" | "award";
 };
 
+type InitiativeStatus = "idea" | "review" | "active" | "done";
+type Initiative = {
+  id: number;
+  title: string;
+  description: string;
+  author: string;
+  municipality: string;
+  direction: string;
+  impact: string;
+  status: InitiativeStatus;
+  votes: string[];
+  createdAt: string;
+};
+
 const CHAIR_NAME = "Председатель парламента";
 const MEMBER_NAME = "Участник 01";
 const members = [
@@ -119,6 +136,7 @@ const accounts: Account[] = members.map((name, index) => ({
 }));
 const DEFAULT_PASSWORD = "parliament2026";
 const PASSWORD_STORAGE_KEY = "mp-password-hashes-v2";
+const REGISTERED_ACCOUNTS_KEY = "mp-registered-accounts-v1";
 const statuses: { id: TaskStatus; label: string }[] = [
   { id: "new", label: "Новая" },
   { id: "accepted", label: "Принята" },
@@ -238,6 +256,7 @@ const nav: { id: Page; label: string; icon: typeof House }[] = [
   { id: "home", label: "Главная", icon: House },
   { id: "tasks", label: "Задачи", icon: CheckCircle2 },
   { id: "chat", label: "Коммуникация", icon: MessageSquare },
+  { id: "initiatives", label: "Инициативы", icon: Lightbulb },
   { id: "teams", label: "Команды", icon: Users },
   { id: "projects", label: "Проекты", icon: FolderKanban },
   { id: "calendar", label: "Календарь", icon: CalendarDays },
@@ -245,6 +264,52 @@ const nav: { id: Page; label: string; icon: typeof House }[] = [
   { id: "awards", label: "Достижения", icon: Trophy },
   { id: "analytics", label: "Аналитика", icon: BarChart3 },
   { id: "profile", label: "Профиль", icon: UserRound },
+];
+
+const initiativeStatuses: { id: InitiativeStatus; label: string }[] = [
+  { id: "idea", label: "Идея" },
+  { id: "review", label: "На рассмотрении" },
+  { id: "active", label: "В реализации" },
+  { id: "done", label: "Реализовано" },
+];
+
+const initialInitiatives: Initiative[] = [
+  {
+    id: 3,
+    title: "Молодёжная карта возможностей",
+    description: "Единый каталог стажировок, конкурсов, волонтёрских и образовательных программ муниципалитетов.",
+    author: "Участник 04",
+    municipality: "Луганск",
+    direction: "Образование и карьера",
+    impact: "Высокий",
+    status: "active",
+    votes: ["member01", "member02", "member03", "chair"],
+    createdAt: "2026-09-18",
+  },
+  {
+    id: 2,
+    title: "Школа общественного проектирования",
+    description: "Практический курс, где молодые авторы превращают проблему муниципалитета в готовую инициативу.",
+    author: "Участник 02",
+    municipality: "Алчевск",
+    direction: "Развитие и навыки",
+    impact: "Высокий",
+    status: "review",
+    votes: ["member01", "member05", "member06"],
+    createdAt: "2026-09-16",
+  },
+  {
+    id: 1,
+    title: "Добровольческий десант",
+    description: "Система коротких волонтёрских смен с понятным результатом, наставником и подтверждением вклада.",
+    author: "Участник 07",
+    municipality: "Краснодон",
+    direction: "Добровольчество",
+    impact: "Средний",
+    status: "idea",
+    votes: ["member03"],
+    createdAt: "2026-09-12",
+  },
 ];
 
 function countdown(dueAt: string, done = false) {
@@ -267,10 +332,21 @@ function App() {
   );
   const [passwordHashes, setPasswordHashes] =
     useState<Record<string, string>>(loadPasswordHashes);
+  const [registeredAccounts, setRegisteredAccounts] = useState<Account[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(REGISTERED_ACCOUNTS_KEY) || "[]") as Account[];
+    } catch {
+      return [];
+    }
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [tasks, setTasks] = useState<Task[]>(() => {
     const saved = localStorage.getItem("mp-tasks-v3");
     return saved ? JSON.parse(saved) : initialTasks;
+  });
+  const [initiatives, setInitiatives] = useState<Initiative[]>(() => {
+    const saved = localStorage.getItem("mp-initiatives-v1");
+    return saved ? JSON.parse(saved) : initialInitiatives;
   });
   const [notices, setNotices] = useState<Notice[]>([
     {
@@ -297,6 +373,7 @@ function App() {
   ]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [initiativeOpen, setInitiativeOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [roleOpen, setRoleOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -308,9 +385,17 @@ function App() {
     [tasks],
   );
   useEffect(
+    () => localStorage.setItem("mp-initiatives-v1", JSON.stringify(initiatives)),
+    [initiatives],
+  );
+  useEffect(
     () =>
       localStorage.setItem(PASSWORD_STORAGE_KEY, JSON.stringify(passwordHashes)),
     [passwordHashes],
+  );
+  useEffect(
+    () => localStorage.setItem(REGISTERED_ACCOUNTS_KEY, JSON.stringify(registeredAccounts)),
+    [registeredAccounts],
   );
   useEffect(() => {
     if (!toast) return;
@@ -378,6 +463,63 @@ function App() {
     setPage("tasks");
   };
 
+  const createInitiative = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const initiative: Initiative = {
+      id: Math.max(...initiatives.map((item) => item.id), 0) + 1,
+      title: String(data.get("title")),
+      description: String(data.get("description")),
+      author: currentAccount.name,
+      municipality: String(data.get("municipality")),
+      direction: String(data.get("direction")),
+      impact: String(data.get("impact")),
+      status: "idea",
+      votes: [currentAccount.username],
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+    setInitiatives((current) => [initiative, ...current]);
+    setNotices((current) => [
+      {
+        id: Date.now(),
+        title: "Новая молодёжная инициатива",
+        detail: `${initiative.title} · ${initiative.municipality}`,
+        read: false,
+        kind: "message",
+      },
+      ...current,
+    ]);
+    setToast("Инициатива добавлена в банк идей");
+    setPage("initiatives");
+  };
+
+  const voteForInitiative = (id: number) => {
+    setInitiatives((current) =>
+      current.map((initiative) => {
+        if (initiative.id !== id) return initiative;
+        const hasVoted = initiative.votes.includes(currentAccount.username);
+        return {
+          ...initiative,
+          votes: hasVoted
+            ? initiative.votes.filter((username) => username !== currentAccount.username)
+            : [...initiative.votes, currentAccount.username],
+        };
+      }),
+    );
+  };
+
+  const advanceInitiative = (id: number) => {
+    setInitiatives((current) =>
+      current.map((initiative) => {
+        if (initiative.id !== id) return initiative;
+        const index = initiativeStatuses.findIndex((item) => item.id === initiative.status);
+        const next = initiativeStatuses[Math.min(index + 1, initiativeStatuses.length - 1)].id;
+        return { ...initiative, status: next };
+      }),
+    );
+    setToast("Статус инициативы обновлён");
+  };
+
   const submitResult = (task: Task) => {
     updateTask(
       task.id,
@@ -406,6 +548,7 @@ function App() {
   };
 
   const role = currentAccount.role;
+  const availableAccounts = [...accounts, ...registeredAccounts];
   const currentUser = {
     name: currentAccount.name,
     username: currentAccount.username,
@@ -414,7 +557,7 @@ function App() {
   };
 
   const authenticate = async (username: string, password: string) => {
-    const account = accounts.find(
+    const account = availableAccounts.find(
       (item) => item.username.toLowerCase() === username.toLowerCase(),
     );
     if (!account) return "Учётная запись не найдена";
@@ -453,6 +596,31 @@ function App() {
           setTheme((value) => (value === "dark" ? "light" : "dark"))
         }
         onLogin={authenticate}
+        accounts={availableAccounts}
+        onRegister={async (name, username, password) => {
+          const normalizedUsername = username.trim().toLowerCase();
+          if (name.trim().length < 3) return "Укажите имя и фамилию";
+          if (!/^[a-z0-9._-]{3,24}$/.test(normalizedUsername)) {
+            return "Логин: 3–24 символа, только латиница, цифры, точка, _ или -";
+          }
+          if (availableAccounts.some((item) => item.username === normalizedUsername)) {
+            return "Такой логин уже занят";
+          }
+          if (password.length < 8) return "Пароль должен содержать не менее 8 символов";
+          const account: Account = {
+            name: name.trim(),
+            username: normalizedUsername,
+            role: "member",
+            initials: name.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase(),
+          };
+          const passwordHash = await hashPassword(password);
+          setRegisteredAccounts((current) => [...current, account]);
+          setPasswordHashes((current) => ({ ...current, [normalizedUsername]: passwordHash }));
+          setCurrentAccount(account);
+          setAuthenticated(true);
+          setPage("home");
+          return null;
+        }}
       />
     );
   }
@@ -627,6 +795,17 @@ function App() {
           {page === "chat" && (
             <Communication onTask={() => setCreateOpen(true)} />
           )}
+          {page === "initiatives" && (
+            <InitiativesPage
+              initiatives={initiatives}
+              currentUsername={currentAccount.username}
+              currentName={currentAccount.name}
+              isChair={role === "chair"}
+              onCreate={() => setInitiativeOpen(true)}
+              onVote={voteForInitiative}
+              onAdvance={advanceInitiative}
+            />
+          )}
           {page === "teams" && <TeamsPage />}
           {page === "projects" && <ProjectsPage />}
           {page === "calendar" && <CalendarPage tasks={tasks} />}
@@ -662,6 +841,12 @@ function App() {
           onSubmit={createTask}
         />
       )}
+      {initiativeOpen && (
+        <CreateInitiative
+          onClose={() => setInitiativeOpen(false)}
+          onSubmit={createInitiative}
+        />
+      )}
       {searchOpen && (
         <SearchDialog
           tasks={tasks}
@@ -686,24 +871,37 @@ function LoginScreen({
   theme,
   onTheme,
   onLogin,
+  accounts: availableAccounts,
+  onRegister,
 }: {
   theme: "dark" | "light";
   onTheme: () => void;
   onLogin: (username: string, password: string) => Promise<string | null>;
+  accounts: Account[];
+  onRegister: (name: string, username: string, password: string) => Promise<string | null>;
 }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("chair");
+  const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const selectedAccount = accounts.find(
+  const selectedAccount = availableAccounts.find(
     (account) => account.username === username,
-  )!;
+  ) || availableAccounts[0];
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLoading(true);
     setError("");
     const data = new FormData(event.currentTarget);
-    const loginError = await onLogin(username, String(data.get("password")));
+    if (mode === "register" && data.get("password") !== data.get("confirmPassword")) {
+      setError("Пароли не совпадают");
+      setLoading(false);
+      return;
+    }
+    const loginError = mode === "login"
+      ? await onLogin(username, String(data.get("password")))
+      : await onRegister(name, username, String(data.get("password")));
     setError(loginError || "");
     setLoading(false);
   };
@@ -754,9 +952,10 @@ function LoginScreen({
       <section className="login-panel">
         <div className="login-box">
           <span className="eyebrow">МП.Штаб · Доступ к системе</span>
-          <h2>Вход в пространство</h2>
-          <p>Выберите свою учётную запись и введите пароль.</p>
-          <div className="selected-account">
+          <div className="login-mode-tabs"><button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setUsername("chair"); setError(""); }}>Войти</button><button type="button" className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setUsername(""); setError(""); }}>Регистрация</button></div>
+          <h2>{mode === "login" ? "Вход в пространство" : "Создать аккаунт"}</h2>
+          <p>{mode === "login" ? "Выберите свою учётную запись и введите пароль." : "Зарегистрируйтесь как участник молодёжной экосистемы."}</p>
+          {mode === "login" && <div className="selected-account">
             <span>{selectedAccount.initials}</span>
             <div>
               <strong>{selectedAccount.name}</strong>
@@ -765,25 +964,23 @@ function LoginScreen({
               </small>
             </div>
             {selectedAccount.role === "chair" && <ShieldCheck />}
-          </div>
+          </div>}
           <form onSubmit={submit}>
+            {mode === "register" && <label>Имя и фамилия<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Иван Иванов" required minLength={3} /></label>}
             <label>
               Учётная запись
               <div>
                 <UserRound />
-                <select
+                {mode === "login" ? <select
                   value={username}
-                  onChange={(event) => {
-                    setUsername(event.target.value);
-                    setError("");
-                  }}
+                  onChange={(event) => { setUsername(event.target.value); setError(""); }}
                 >
-                  {accounts.map((account) => (
+                  {availableAccounts.map((account) => (
                     <option key={account.username} value={account.username}>
                       {account.name} · {account.username}
                     </option>
                   ))}
-                </select>
+                </select> : <input value={username} onChange={(event) => { setUsername(event.target.value); setError(""); }} placeholder="ivan.ivanov" required minLength={3} />}
               </div>
             </label>
             <label>
@@ -791,9 +988,12 @@ function LoginScreen({
               <div>
                 <LockKeyhole />
                 <input
+                  key={mode}
                   type={showPassword ? "text" : "password"}
                   name="password"
-                  defaultValue="parliament2026"
+                  defaultValue={mode === "login" ? "parliament2026" : ""}
+                  minLength={8}
+                  required
                 />
                 <button
                   type="button"
@@ -803,20 +1003,21 @@ function LoginScreen({
                 </button>
               </div>
             </label>
+            {mode === "register" && <label>Повторите пароль<div><LockKeyhole /><input type={showPassword ? "text" : "password"} name="confirmPassword" minLength={8} required /></div></label>}
             {error && <div className="login-error"><CircleAlert />{error}</div>}
-            <div className="login-options">
+            {mode === "login" && <div className="login-options">
               <label>
                 <input type="checkbox" defaultChecked />
                 Запомнить на этом устройстве
               </label>
               <button type="button">Не получается войти?</button>
-            </div>
+            </div>}
             <button className="login-submit" disabled={loading}>
               {loading ? (
                 <span className="spinner" />
               ) : (
                 <>
-                  <span>Войти в штаб</span>
+                  <span>{mode === "login" ? "Войти в штаб" : "Зарегистрироваться"}</span>
                   <ChevronRight />
                 </>
               )}
@@ -824,7 +1025,7 @@ function LoginScreen({
           </form>
           <small className="demo-note">
             <CircleAlert />
-            Первичный пароль для всех аккаунтов: parliament2026
+            {mode === "login" ? "Первичный пароль для демонстрационных аккаунтов: parliament2026" : "Новый аккаунт сохраняется на этом устройстве"}
           </small>
         </div>
         <footer>Версия 0.1 · Автономный контур организации</footer>
@@ -1654,6 +1855,117 @@ function Communication({ onTask }: { onTask: () => void }) {
         </section>
       </div>
     </>
+  );
+}
+
+function InitiativesPage({
+  initiatives,
+  currentUsername,
+  currentName,
+  isChair,
+  onCreate,
+  onVote,
+  onAdvance,
+}: {
+  initiatives: Initiative[];
+  currentUsername: string;
+  currentName: string;
+  isChair: boolean;
+  onCreate: () => void;
+  onVote: (id: number) => void;
+  onAdvance: (id: number) => void;
+}) {
+  const [filter, setFilter] = useState<"all" | "mine" | InitiativeStatus>("all");
+  const filtered = initiatives.filter((initiative) => {
+    if (filter === "mine") return initiative.author === currentName;
+    if (filter === "all") return true;
+    return initiative.status === filter;
+  });
+  const activeCount = initiatives.filter((item) => item.status === "active").length;
+  const voteCount = initiatives.reduce((sum, item) => sum + item.votes.length, 0);
+  return (
+    <>
+      <PageTitle
+        eyebrow="Голос молодёжи"
+        title="Инициативы"
+        text="Банк идей, коллективная поддержка и прозрачный путь до результата."
+        action={
+          <button className="primary" onClick={onCreate}>
+            <Plus size={18} />
+            Предложить идею
+          </button>
+        }
+      />
+      <div className="initiative-summary">
+        <div><Lightbulb /><strong>{initiatives.length}</strong><span>идей в банке</span></div>
+        <div><Users /><strong>{voteCount}</strong><span>поддержок сообщества</span></div>
+        <div><Target /><strong>{activeCount}</strong><span>инициатив в работе</span></div>
+        <div><MapPin /><strong>14</strong><span>муниципалитетов</span></div>
+      </div>
+      <div className="initiative-toolbar">
+        <div className="tabs">
+          {[
+            ["all", "Все идеи"],
+            ["mine", "Мои идеи"],
+            ["idea", "Новые"],
+            ["review", "На рассмотрении"],
+            ["active", "В работе"],
+            ["done", "Результаты"],
+          ].map(([value, label]) => (
+            <button key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value as typeof filter)}>{label}</button>
+          ))}
+        </div>
+        <span className="initiative-count">Показано: {filtered.length}</span>
+      </div>
+      <div className="initiative-grid">
+        {filtered.map((initiative) => {
+          const voted = initiative.votes.includes(currentUsername);
+          const status = initiativeStatuses.find((item) => item.id === initiative.status)!;
+          return (
+            <article className="initiative-card" key={initiative.id}>
+              <header>
+                <span className={`initiative-status status-${initiative.status}`}>{status.label}</span>
+                <small>#{String(initiative.id).padStart(3, "0")}</small>
+              </header>
+              <h3>{initiative.title}</h3>
+              <p>{initiative.description}</p>
+              <div className="initiative-tags"><span>{initiative.direction}</span><span><MapPin size={12} />{initiative.municipality}</span></div>
+              <footer>
+                <div className="initiative-author"><span className="mini-avatar">{initiative.author.split(" ").map((part) => part[0]).join("")}</span><small>{initiative.author}</small></div>
+                <button className={`support-button ${voted ? "supported" : ""}`} onClick={() => onVote(initiative.id)}><HeartIcon filled={voted} /> {initiative.votes.length}</button>
+              </footer>
+              <div className="initiative-actions">
+                <span>Потенциальный эффект: <b>{initiative.impact}</b></span>
+                {isChair && initiative.status !== "done" && <button className="text-button" onClick={() => onAdvance(initiative.id)}>Следующий этап <ChevronRight size={14} /></button>}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      {!filtered.length && <div className="empty-state panel"><Lightbulb /><strong>Здесь пока нет инициатив</strong><span>Предложите идею, которая улучшит жизнь молодёжи в вашем муниципалитете.</span><button className="primary" onClick={onCreate}>Создать первую идею</button></div>}
+    </>
+  );
+}
+
+function HeartIcon({ filled }: { filled: boolean }) {
+  return <span className={`heart-icon ${filled ? "filled" : ""}`}>♥</span>;
+}
+
+function CreateInitiative({ onClose, onSubmit }: { onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return (
+    <div className="overlay" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <form className="modal create-modal" onSubmit={onSubmit}>
+        <header><div><span className="eyebrow"><Lightbulb size={14} /> Новый вклад</span><h2>Предложить инициативу</h2></div><button type="button" onClick={onClose}><X /></button></header>
+        <div className="form-grid">
+          <label className="full">Название идеи<input name="title" required minLength={5} placeholder="Например, Молодёжная карта возможностей" /></label>
+          <label>Муниципалитет<select name="municipality" defaultValue="Луганск"><option>Луганск</option><option>Алчевск</option><option>Краснодон</option><option>Свердловск</option><option>Другой муниципалитет</option></select></label>
+          <label>Направление<select name="direction" defaultValue="Образование и карьера"><option>Образование и карьера</option><option>Добровольчество</option><option>Культура и медиа</option><option>Спорт и здоровье</option><option>Городская среда</option></select></label>
+          <label>Потенциальный эффект<select name="impact" defaultValue="Высокий"><option>Высокий</option><option>Средний</option><option>Локальный</option></select></label>
+          <label className="full">Что изменится?<textarea name="description" required minLength={20} rows={4} placeholder="Опишите проблему, решение и пользу для молодых людей." /></label>
+        </div>
+        <footer><button type="button" className="secondary" onClick={onClose}>Отмена</button><button type="submit" className="primary"><Send size={16} />Добавить идею</button></footer>
+      </form>
+    </div>
   );
 }
 
