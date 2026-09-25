@@ -48,11 +48,14 @@ import {
 import logoUrl from "../Логотип.jpg";
 
 type Role = "chair" | "member";
+type ParticipantCategory = "parliament" | "municipal" | "reserve";
 type Account = {
   name: string;
   username: string;
   role: Role;
   initials: string;
+  category?: ParticipantCategory;
+  municipality?: string;
 };
 type Page =
   | "home"
@@ -130,6 +133,43 @@ type Opportunity = {
 
 const CHAIR_NAME = "Председатель парламента";
 const MEMBER_NAME = "Участник 01";
+const participantCategories: { id: ParticipantCategory; label: string }[] = [
+  { id: "parliament", label: "Член Молодёжного парламента" },
+  { id: "municipal", label: "Член муниципальной палаты" },
+  { id: "reserve", label: "Резервист Молодёжного парламента" },
+];
+const municipalities = [
+  "город Алчевск",
+  "город Брянка",
+  "город Кировск",
+  "город Красный Луч",
+  "город Лисичанск",
+  "город Луганск",
+  "город Первомайск",
+  "город Ровеньки",
+  "город Рубежное",
+  "город Северодонецк",
+  "город Стаханов",
+  "Антрацитовский муниципальный округ",
+  "Беловодский муниципальный округ",
+  "Белокуракинский муниципальный округ",
+  "Краснодонский муниципальный округ",
+  "Кременской муниципальный округ",
+  "Лутугинский муниципальный округ",
+  "Марковский муниципальный округ",
+  "Меловский муниципальный округ",
+  "Новоайдарский муниципальный округ",
+  "Новопсковский муниципальный округ",
+  "Перевальский муниципальный округ",
+  "Сватовский муниципальный округ",
+  "Свердловский муниципальный округ",
+  "Славяносербский муниципальный округ",
+  "Станично-Луганский муниципальный округ",
+  "Старобельский муниципальный округ",
+  "Троицкий муниципальный округ",
+];
+const categoryLabel = (category?: ParticipantCategory) =>
+  participantCategories.find((item) => item.id === (category || "parliament"))?.label || participantCategories[0].label;
 const members = [
   CHAIR_NAME,
   ...Array.from(
@@ -152,6 +192,8 @@ const accounts: Account[] = members.map((name, index) => ({
     .split(" ")
     .map((part) => part[0])
     .join(""),
+  category: index <= 20 ? "parliament" : index <= 26 ? "municipal" : "reserve",
+  municipality: index > 20 && index <= 26 ? municipalities[index - 21] : "Луганская Народная Республика",
 }));
 const DEFAULT_PASSWORD = "parliament2026";
 const PASSWORD_STORAGE_KEY = "mp-password-hashes-v2";
@@ -690,8 +732,10 @@ function App() {
   const currentUser = {
     name: currentAccount.name,
     username: currentAccount.username,
-    role: role === "chair" ? "Председатель" : "Участник",
+    role: role === "chair" ? "Председатель" : categoryLabel(currentAccount.category),
     initials: currentAccount.initials,
+    category: currentAccount.category || "parliament" as ParticipantCategory,
+    municipality: currentAccount.municipality || "Луганская Народная Республика",
   };
 
   const authenticate = async (username: string, password: string) => {
@@ -735,7 +779,7 @@ function App() {
         }
         onLogin={authenticate}
         accounts={availableAccounts}
-        onRegister={async (name, username, password) => {
+        onRegister={async (name, username, password, category, municipality) => {
           const normalizedUsername = username.trim().toLowerCase();
           if (name.trim().length < 3) return "Укажите имя и фамилию";
           if (!/^[a-z0-9._-]{3,24}$/.test(normalizedUsername)) {
@@ -750,6 +794,8 @@ function App() {
             username: normalizedUsername,
             role: "member",
             initials: name.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase(),
+            category,
+            municipality: category === "municipal" ? municipality : "Луганская Народная Республика",
           };
           const passwordHash = await hashPassword(password);
           setRegisteredAccounts((current) => [...current, account]);
@@ -952,7 +998,7 @@ function App() {
               onApply={applyToOpportunity}
             />
           )}
-          {page === "teams" && <TeamsPage />}
+          {page === "teams" && <TeamsPage accounts={availableAccounts} />}
           {page === "projects" && <ProjectsPage />}
           {page === "calendar" && <CalendarPage tasks={tasks} />}
           {page === "learning" && <LearningPage />}
@@ -1024,11 +1070,13 @@ function LoginScreen({
   onTheme: () => void;
   onLogin: (username: string, password: string) => Promise<string | null>;
   accounts: Account[];
-  onRegister: (name: string, username: string, password: string) => Promise<string | null>;
+  onRegister: (name: string, username: string, password: string, category: ParticipantCategory, municipality: string) => Promise<string | null>;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("chair");
   const [name, setName] = useState("");
+  const [category, setCategory] = useState<ParticipantCategory>("parliament");
+  const [municipality, setMunicipality] = useState(municipalities[0]);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1047,7 +1095,7 @@ function LoginScreen({
     }
     const loginError = mode === "login"
       ? await onLogin(username, String(data.get("password")))
-      : await onRegister(name, username, String(data.get("password")));
+      : await onRegister(name, username, String(data.get("password")), category, municipality);
     setError(loginError || "");
     setLoading(false);
   };
@@ -1106,13 +1154,15 @@ function LoginScreen({
             <div>
               <strong>{selectedAccount.name}</strong>
               <small>
-                {selectedAccount.role === "chair" ? "Председатель" : "Участник"}
+                {selectedAccount.role === "chair" ? "Председатель" : categoryLabel(selectedAccount.category)}
               </small>
             </div>
             {selectedAccount.role === "chair" && <ShieldCheck />}
           </div>}
           <form onSubmit={submit}>
             {mode === "register" && <label>Имя и фамилия<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Иван Иванов" required minLength={3} /></label>}
+            {mode === "register" && <label>Категория участника<div><Users /><select value={category} onChange={(event) => setCategory(event.target.value as ParticipantCategory)}>{participantCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></div></label>}
+            {mode === "register" && category === "municipal" && <label>Муниципальная палата<div><MapPin /><select value={municipality} onChange={(event) => setMunicipality(event.target.value)}>{municipalities.map((item) => <option key={item}>{item}</option>)}</select></div></label>}
             <label>
               Учётная запись
               <div>
@@ -2210,7 +2260,9 @@ function OpportunityDialog({
   );
 }
 
-function TeamsPage() {
+function TeamsPage({ accounts }: { accounts: Account[] }) {
+  const [categoryFilter, setCategoryFilter] = useState<"all" | ParticipantCategory>("all");
+  const visibleAccounts = categoryFilter === "all" ? accounts : accounts.filter((account) => (account.category || "parliament") === categoryFilter);
   return (
     <>
       <PageTitle
@@ -2249,16 +2301,24 @@ function TeamsPage() {
           </article>
         ))}
       </div>
+      <div className="community-groups">
+        {participantCategories.map((category) => (
+          <button key={category.id} className={categoryFilter === category.id ? "active" : ""} onClick={() => setCategoryFilter(categoryFilter === category.id ? "all" : category.id)}>
+            <span><Users /></span>
+            <div><strong>{accounts.filter((account) => (account.category || "parliament") === category.id).length}</strong><small>{category.label}</small></div>
+          </button>
+        ))}
+      </div>
       <section className="panel roster">
         <div className="panel-head">
           <div>
-            <span className="eyebrow">Официальный состав</span>
-            <h3>Молодёжный парламент ЛНР</h3>
+            <span className="eyebrow">Единое сообщество</span>
+            <h3>{categoryFilter === "all" ? "Участники молодёжной экосистемы" : categoryLabel(categoryFilter)}</h3>
           </div>
-          <strong>32 участника</strong>
+          <strong>{visibleAccounts.length} участников</strong>
         </div>
         <div className="roster-grid">
-          {accounts.map((account) => (
+          {visibleAccounts.map((account) => (
             <article
               className={account.role === "chair" ? "chair" : ""}
               key={account.username}
@@ -2267,8 +2327,9 @@ function TeamsPage() {
               <div>
                 <strong>{account.name}</strong>
                 <small>
-                  {account.role === "chair" ? "Председатель" : "Участник"} · {account.username}
+                  {account.role === "chair" ? "Председатель · " : ""}{categoryLabel(account.category)}
                 </small>
+                {account.category === "municipal" && <small className="roster-municipality">{account.municipality}</small>}
               </div>
               {account.role === "chair" && <ShieldCheck />}
             </article>
@@ -2614,7 +2675,7 @@ function ProfilePage({
   xp,
   onChangePassword,
 }: {
-  user: { name: string; username: string; role: string; initials: string };
+  user: { name: string; username: string; role: string; initials: string; category: ParticipantCategory; municipality: string };
   xp: number;
   onChangePassword: (
     currentPassword: string,
@@ -2653,9 +2714,10 @@ function ProfilePage({
         <div>
           <span className="eyebrow">Личная карточка участника</span>
           <h1>{user.name}</h1>
-          <p>{user.role} · Направление проектного управления</p>
+          <p>{user.role} · Молодёжная экосистема ЛНР</p>
           <div className="profile-tags">
-            <span>Луганск</span>
+            <span>{categoryLabel(user.category)}</span>
+            <span>{user.municipality}</span>
             <span>Уровень 6 · Управленец</span>
             <span>В системе 184 дня</span>
           </div>
@@ -2764,7 +2826,7 @@ function AdminPage({
           ["Участники", "32", "официальный состав"],
           ["Активные проекты", "9", "3 контрольные точки"],
           ["Задачи в работе", String(stats.working), "87% в срок"],
-          ["Муниципалитеты", "14", "12 активны"],
+          ["Муниципалитеты", "28", "единый контур палат"],
         ].map((x) => (
           <article key={x[0]}>
             <small>{x[0]}</small>
