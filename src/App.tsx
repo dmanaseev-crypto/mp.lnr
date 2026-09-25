@@ -139,6 +139,12 @@ type DevelopmentProfile = {
   pendingChallenges?: Record<string, string>;
 };
 
+const normalizeDevelopmentProfile = (profile?: DevelopmentProfile): DevelopmentProfile => ({
+  goal: profile?.goal || "",
+  completedChallenges: profile?.completedChallenges || [],
+  pendingChallenges: profile?.pendingChallenges || {},
+});
+
 const CHAIR_NAME = "Председатель парламента";
 const MEMBER_NAME = "Участник 01";
 const participantCategories: { id: ParticipantCategory; label: string }[] = [
@@ -1083,7 +1089,7 @@ function App() {
           {page === "calendar" && <CalendarPage tasks={tasks} />}
           {page === "learning" && (
             <LearningPage
-              profile={{ goal: "", completedChallenges: [], pendingChallenges: {}, ...development[currentAccount.username] }}
+              profile={normalizeDevelopmentProfile(development[currentAccount.username])}
               onChange={(profile) => setDevelopment((current) => ({ ...current, [currentAccount.username]: profile }))}
             />
           )}
@@ -1099,7 +1105,7 @@ function App() {
               isChair={role === "chair"}
               onReviewChallenge={(username, challengeId, approved) => {
                 setDevelopment((current) => {
-                  const profile = { goal: "", completedChallenges: [], pendingChallenges: {}, ...current[username] };
+                  const profile = normalizeDevelopmentProfile(current[username]);
                   const pendingChallenges = { ...profile.pendingChallenges };
                   delete pendingChallenges[challengeId];
                   return {
