@@ -136,6 +136,7 @@ type Opportunity = {
 type DevelopmentProfile = {
   goal: string;
   completedChallenges: string[];
+  pendingChallenges?: Record<string, string>;
 };
 
 const CHAIR_NAME = "Председатель парламента";
@@ -611,9 +612,26 @@ function App() {
     if (message) setToast(message);
   };
 
+  const moveTask = (id: number, status: TaskStatus) => {
+    const task = tasks.find((item) => item.id === id);
+    if (!task) return;
+    const canManage = role === "chair" || managedDirections.includes(task.direction);
+    if (!canManage) {
+      setToast("Статус меняется через действия внутри задачи");
+      return;
+    }
+    if (["review", "done"].includes(status)) {
+      setToast("Проверка и завершение доступны только после сдачи результата");
+      return;
+    }
+    updateTask(id, { status }, "Статус задачи обновлён");
+  };
+
   const createTask = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const priority = String(data.get("priority")) as Priority;
+    const taskXp: Record<Priority, number> = { Высокий: 150, Средний: 100, Обычный: 60 };
     const task: Task = {
       id: Math.max(...tasks.map((item) => item.id), 0) + 1,
       title: String(data.get("title")),
@@ -624,11 +642,11 @@ function App() {
       direction: String(data.get("direction")),
       leader: currentAccount.name,
       dueAt: new Date(String(data.get("dueAt"))).toISOString(),
-      priority: String(data.get("priority")) as Priority,
+      priority,
       status: "new",
       resultFormat: String(data.get("resultFormat")),
       criteria: String(data.get("criteria")),
-      xp: 100,
+      xp: taskXp[priority],
     };
     setTasks((current) => [task, ...current]);
     setNotices((current) => [
@@ -758,10 +776,10 @@ function App() {
     ]);
   };
 
-  const acceptResult = (task: Task) => {
+  const acceptResult = (task: Task, feedback: string) => {
     updateTask(
       task.id,
-      { status: "done", reviewComment: "Результат принят" },
+      { status: "done", reviewComment: feedback },
       `Результат принят · +${task.xp} XP`,
     );
     setXp((current) => current + task.xp);
@@ -1021,9 +1039,7 @@ function App() {
               tasks={tasks}
               onTask={setSelectedTask}
               onCreate={() => setCreateOpen(true)}
-              onMove={(id, status) =>
-                updateTask(id, { status }, "Статус задачи обновлён")
-              }
+              onMove={moveTask}
             />
           )}
           {page === "chat" && (
@@ -1067,7 +1083,7 @@ function App() {
           {page === "calendar" && <CalendarPage tasks={tasks} />}
           {page === "learning" && (
             <LearningPage
-              profile={development[currentAccount.username] || { goal: "", completedChallenges: [] }}
+              profile={{ goal: "", completedChallenges: [], pendingChallenges: {}, ...development[currentAccount.username] }}
               onChange={(profile) => setDevelopment((current) => ({ ...current, [currentAccount.username]: profile }))}
             />
           )}
@@ -1080,6 +1096,25 @@ function App() {
               opportunities={opportunities}
               development={development}
               currentUsername={currentAccount.username}
+              isChair={role === "chair"}
+              onReviewChallenge={(username, challengeId, approved) => {
+                setDevelopment((current) => {
+                  const profile = { goal: "", completedChallenges: [], pendingChallenges: {}, ...current[username] };
+                  const pendingChallenges = { ...profile.pendingChallenges };
+                  delete pendingChallenges[challengeId];
+                  return {
+                    ...current,
+                    [username]: {
+                      ...profile,
+                      pendingChallenges,
+                      completedChallenges: approved && !profile.completedChallenges.includes(challengeId)
+                        ? [...profile.completedChallenges, challengeId]
+                        : profile.completedChallenges,
+                    },
+                  };
+                });
+                setToast(approved ? "Практика подтверждена и учтена в рейтинге" : "Практика возвращена участнику");
+              }}
             />
           )}
           {page === "analytics" && <AnalyticsPage stats={stats} />}
@@ -1601,12 +1636,33 @@ function TasksPage({
   onCreate: () => void;
   onMove: (id: number, status: TaskStatus) => void;
 }) {
-  const [view, setView] = useState("Все задачи");
-  const visible = role === "chair"
+  const [view, setView] = useState(role === "chair" ? "Все задачи" : "Мои задачи");
+  const [query, setQuery] = useState("");
+  const accessible = role === "chair"
     ? tasks
     : tasks.filter((task) =>
         task.assignee === userName || managedDirections.includes(task.direction),
       );
+  const views = [
+    "Мои задачи",
+    ...(managedDirections.length || role === "chair" ? ["Задачи команды"] : []),
+    "Просроченные",
+    "На проверке",
+    "Все задачи",
+  ];
+  const visible = accessible.filter((task) => {
+    const matchesView = view === "Мои задачи"
+      ? task.assignee === userName
+      : view === "Задачи команды"
+        ? role === "chair" || managedDirections.includes(task.direction)
+        : view === "Просроченные"
+          ? task.status !== "done" && new Date(task.dueAt).getTime() < Date.now()
+          : view === "На проверке"
+            ? task.status === "review"
+            : true;
+    const haystack = `${task.title} ${task.assignee} ${task.project} ${task.direction} ${task.municipality}`.toLowerCase();
+    return matchesView && haystack.includes(query.trim().toLowerCase());
+  });
   return (
     <>
       <PageTitle
@@ -1622,15 +1678,14 @@ function TasksPage({
           )
         }
       />
+      <label className="task-search">
+        <Search size={17} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти задачу, проект, исполнителя или муниципалитет" />
+        {query && <button onClick={() => setQuery("")} title="Очистить"><X size={15} /></button>}
+      </label>
       <div className="toolbar">
         <div className="tabs">
-          {[
-            "Мои задачи",
-            "Задачи команды",
-            "Муниципалитет",
-            "Проект",
-            "Все задачи",
-          ].map((item) => (
+          {views.map((item) => (
             <button
               className={view === item ? "active" : ""}
               onClick={() => setView(item)}
@@ -1640,12 +1695,9 @@ function TasksPage({
             </button>
           ))}
         </div>
-        <button className="filter">
-          <Gauge size={17} />
-          Фильтры
-        </button>
+        <span className="task-result-count"><Gauge size={15} />{visible.length} задач</span>
       </div>
-      <div className="kanban">
+      {visible.length > 0 && <div className="kanban">
         {statuses.map((column) => (
           <section
             className="kanban-column"
@@ -1666,7 +1718,7 @@ function TasksPage({
                 .filter((t) => t.status === column.id)
                 .map((task) => (
                   <button
-                    draggable
+                    draggable={(role === "chair" || managedDirections.includes(task.direction)) && !["review", "done"].includes(task.status)}
                     onDragStart={(event) =>
                       event.dataTransfer.setData("taskId", String(task.id))
                     }
@@ -1706,7 +1758,15 @@ function TasksPage({
             </div>
           </section>
         ))}
-      </div>
+      </div>}
+      {!visible.length && (
+        <div className="empty-state panel task-empty">
+          <Search />
+          <strong>Задачи не найдены</strong>
+          <span>Измените запрос или выберите другой фильтр.</span>
+          <button className="secondary" onClick={() => { setQuery(""); setView("Все задачи"); }}>Сбросить фильтры</button>
+        </div>
+      )}
     </>
   );
 }
@@ -1728,8 +1788,9 @@ function TaskDrawer({
   onClose: () => void;
   onUpdate: (id: number, patch: Partial<Task>, message?: string) => void;
   onSubmit: (t: Task) => void;
-  onAccept: (t: Task) => void;
+  onAccept: (t: Task, feedback: string) => void;
 }) {
+  const [reviewNote, setReviewNote] = useState(task.reviewComment || "");
   return (
     <div
       className="overlay drawer-overlay"
@@ -1831,6 +1892,18 @@ function TaskDrawer({
             </p>
           </div>
         )}
+        {canReview && task.status === "review" && (
+          <label className="review-feedback">
+            Обратная связь участнику
+            <textarea
+              value={reviewNote}
+              onChange={(event) => setReviewNote(event.target.value)}
+              rows={3}
+              placeholder="Что получилось хорошо и что стоит улучшить?"
+            />
+            <small>Минимум 5 символов. Комментарий сохранится в задаче.</small>
+          </label>
+        )}
         <footer className="drawer-actions">
           {role === "member" && task.assignee === currentName && task.status === "new" && (
             <button
@@ -1875,13 +1948,13 @@ function TaskDrawer({
             <>
               <button
                 className="secondary danger"
+                disabled={reviewNote.trim().length < 5}
                 onClick={() =>
                   onUpdate(
                     task.id,
                     {
                       status: "working",
-                      reviewComment:
-                        "Необходимо дополнить пункт 3 и загрузить обновлённый вариант.",
+                      reviewComment: reviewNote.trim(),
                     },
                     "Задача возвращена на доработку",
                   )
@@ -1889,7 +1962,7 @@ function TaskDrawer({
               >
                 Нужна доработка
               </button>
-              <button className="primary" onClick={() => onAccept(task)}>
+              <button className="primary" disabled={reviewNote.trim().length < 5} onClick={() => onAccept(task, reviewNote.trim())}>
                 <Check size={17} />
                 Принято
               </button>
@@ -1993,6 +2066,7 @@ function CreateTask({
               <option>Средний</option>
               <option>Обычный</option>
             </select>
+            <small className="field-hint">XP за принятый результат: 150 / 100 / 60</small>
           </label>
           <label>
             Дата и время дедлайна
@@ -2634,6 +2708,9 @@ function LearningPage({
   profile: DevelopmentProfile;
   onChange: (profile: DevelopmentProfile) => void;
 }) {
+  const [activeChallenge, setActiveChallenge] = useState<string | null>(null);
+  const [evidence, setEvidence] = useState("");
+  const pendingChallenges = profile.pendingChallenges || {};
   return (
     <>
       <PageTitle
@@ -2680,21 +2757,42 @@ function LearningPage({
           </div>
           {developmentChallenges.map((challenge) => {
             const completed = profile.completedChallenges.includes(challenge.id);
+            const pending = Boolean(pendingChallenges[challenge.id]);
             return (
-              <button
-                className={completed ? "completed" : ""}
-                key={challenge.id}
-                onClick={() => onChange({
-                  ...profile,
-                  completedChallenges: completed
-                    ? profile.completedChallenges.filter((id) => id !== challenge.id)
-                    : [...profile.completedChallenges, challenge.id],
-                })}
-              >
-                <span>{completed ? <Check /> : <Zap />}</span>
-                <div><strong>{challenge.title}</strong><small>{challenge.skill}</small></div>
-                <b>+{challenge.points}</b>
-              </button>
+              <div className="challenge-item" key={challenge.id}>
+                <button
+                  className={completed ? "completed" : pending ? "pending" : ""}
+                  disabled={completed || pending}
+                  onClick={() => {
+                    setActiveChallenge(challenge.id);
+                    setEvidence("");
+                  }}
+                >
+                  <span>{completed ? <Check /> : pending ? <Clock3 /> : <Zap />}</span>
+                  <div>
+                    <strong>{challenge.title}</strong>
+                    <small>{completed ? "Подтверждено" : pending ? "Ожидает проверки" : challenge.skill}</small>
+                  </div>
+                  <b>{completed ? `+${challenge.points}` : pending ? "На проверке" : "Сдать"}</b>
+                </button>
+                {activeChallenge === challenge.id && !completed && !pending && (
+                  <form
+                    className="challenge-evidence"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      onChange({
+                        ...profile,
+                        pendingChallenges: { ...pendingChallenges, [challenge.id]: evidence.trim() },
+                      });
+                      setActiveChallenge(null);
+                      setEvidence("");
+                    }}
+                  >
+                    <textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} minLength={15} required rows={2} placeholder="Опишите результат или добавьте ссылку на материал" />
+                    <div><small>Баллы начислит председатель после проверки.</small><button type="button" onClick={() => setActiveChallenge(null)}>Отмена</button><button className="primary">Отправить</button></div>
+                  </form>
+                )}
+              </div>
             );
           })}
         </section>
@@ -2738,6 +2836,8 @@ function RatingPage({
   opportunities,
   development,
   currentUsername,
+  isChair,
+  onReviewChallenge,
 }: {
   accounts: Account[];
   tasks: Task[];
@@ -2745,6 +2845,8 @@ function RatingPage({
   opportunities: Opportunity[];
   development: Record<string, DevelopmentProfile>;
   currentUsername: string;
+  isChair: boolean;
+  onReviewChallenge: (username: string, challengeId: string, approved: boolean) => void;
 }) {
   const [category, setCategory] = useState<"all" | ParticipantCategory>("all");
   const rows = accounts.map((account) => {
@@ -2757,7 +2859,7 @@ function RatingPage({
       + authored.reduce((sum, initiative) => sum + initiative.votes.filter((username) => username !== account.username).length * 10, 0);
     const communityPoints = initiatives.filter((initiative) => initiative.votes.includes(account.username) && initiative.author !== account.name).length * 5;
     const opportunityPoints = opportunities.filter((opportunity) => opportunity.applications.some((application) => application.username === account.username)).length * 40;
-    const learningPoints = (development[account.username]?.completedChallenges.length || 0) * 30;
+    const learningPoints = (development[account.username]?.completedChallenges?.length || 0) * 30;
     return {
       account,
       taskPoints,
@@ -2769,6 +2871,14 @@ function RatingPage({
     };
   }).sort((a, b) => b.total - a.total || a.account.name.localeCompare(b.account.name));
   const visible = category === "all" ? rows : rows.filter((row) => (row.account.category || "parliament") === category);
+  const pendingReviews = accounts.flatMap((account) =>
+    Object.entries(development[account.username]?.pendingChallenges || {}).map(([challengeId, evidence]) => ({
+      account,
+      challengeId,
+      evidence,
+      challenge: developmentChallenges.find((item) => item.id === challengeId),
+    })),
+  );
 
   return (
     <>
@@ -2777,10 +2887,23 @@ function RatingPage({
         title="Рейтинг участников"
         text="Баллы рассчитываются автоматически из подтверждённых действий в экосистеме."
       />
+      {isChair && pendingReviews.length > 0 && (
+        <section className="panel development-review">
+          <div className="panel-head"><div><span className="eyebrow">Требует решения</span><h3>Проверка практики развития</h3></div><strong>{pendingReviews.length}</strong></div>
+          {pendingReviews.map((review) => (
+            <article key={`${review.account.username}-${review.challengeId}`}>
+              <span className="mini-avatar">{review.account.initials}</span>
+              <div><strong>{review.account.name} · {review.challenge?.title}</strong><p>{review.evidence}</p></div>
+              <button className="secondary danger" onClick={() => onReviewChallenge(review.account.username, review.challengeId, false)}>Вернуть</button>
+              <button className="primary" onClick={() => onReviewChallenge(review.account.username, review.challengeId, true)}>Подтвердить</button>
+            </article>
+          ))}
+        </section>
+      )}
       <section className="rating-formula">
         <div><CheckCircle2 /><strong>Задачи</strong><span>Фактический XP только за принятый результат</span></div>
         <div><Lightbulb /><strong>Инициативы</strong><span>+120 за идею, +200 за реализацию, +10 за голос</span></div>
-        <div><BookOpen /><strong>Развитие</strong><span>+30 за выполненный практический челлендж</span></div>
+        <div><BookOpen /><strong>Развитие</strong><span>+30 за практический челлендж после проверки председателем</span></div>
         <div><Activity /><strong>Активность</strong><span>+40 за заявку, +5 за поддержку чужой идеи</span></div>
       </section>
       <div className="rating-toolbar">
