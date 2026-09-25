@@ -31,6 +31,7 @@ import {
   Star,
   Target,
   Trophy,
+  TrendingUp,
   Upload,
   UserRound,
   Users,
@@ -68,6 +69,7 @@ type Page =
   | "calendar"
   | "learning"
   | "awards"
+  | "rating"
   | "analytics"
   | "profile"
   | "admin";
@@ -129,6 +131,11 @@ type Opportunity = {
   skills: string[];
   savedBy: string[];
   applications: { username: string; motivation: string; createdAt: string }[];
+};
+
+type DevelopmentProfile = {
+  goal: string;
+  completedChallenges: string[];
 };
 
 const CHAIR_NAME = "Председатель парламента";
@@ -198,6 +205,16 @@ const accounts: Account[] = members.map((name, index) => ({
 const DEFAULT_PASSWORD = "parliament2026";
 const PASSWORD_STORAGE_KEY = "mp-password-hashes-v2";
 const REGISTERED_ACCOUNTS_KEY = "mp-registered-accounts-v1";
+const COORDINATORS_KEY = "mp-coordinators-v1";
+const DEVELOPMENT_KEY = "mp-development-v1";
+const directions = [
+  "Правовое просвещение",
+  "Проектное управление",
+  "Аналитика",
+  "Мероприятия",
+  "Медиа и коммуникации",
+  "Добровольчество",
+];
 const statuses: { id: TaskStatus; label: string }[] = [
   { id: "new", label: "Новая" },
   { id: "accepted", label: "Принята" },
@@ -324,6 +341,7 @@ const nav: { id: Page; label: string; icon: typeof House }[] = [
   { id: "calendar", label: "Календарь", icon: CalendarDays },
   { id: "learning", label: "Развитие", icon: BookOpen },
   { id: "awards", label: "Достижения", icon: Trophy },
+  { id: "rating", label: "Рейтинг", icon: TrendingUp },
   { id: "analytics", label: "Аналитика", icon: BarChart3 },
   { id: "profile", label: "Профиль", icon: UserRound },
 ];
@@ -487,6 +505,20 @@ function App() {
     const saved = localStorage.getItem("mp-opportunities-v1");
     return saved ? JSON.parse(saved) : initialOpportunities;
   });
+  const [coordinators, setCoordinators] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(COORDINATORS_KEY) || "{}") as Record<string, string>;
+    } catch {
+      return {};
+    }
+  });
+  const [development, setDevelopment] = useState<Record<string, DevelopmentProfile>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(DEVELOPMENT_KEY) || "{}") as Record<string, DevelopmentProfile>;
+    } catch {
+      return {};
+    }
+  });
   const [notices, setNotices] = useState<Notice[]>([
     {
       id: 1,
@@ -540,6 +572,14 @@ function App() {
     () => localStorage.setItem(REGISTERED_ACCOUNTS_KEY, JSON.stringify(registeredAccounts)),
     [registeredAccounts],
   );
+  useEffect(
+    () => localStorage.setItem(COORDINATORS_KEY, JSON.stringify(coordinators)),
+    [coordinators],
+  );
+  useEffect(
+    () => localStorage.setItem(DEVELOPMENT_KEY, JSON.stringify(development)),
+    [development],
+  );
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 3200);
@@ -582,7 +622,7 @@ function App() {
       municipality: String(data.get("municipality")),
       project: String(data.get("project")),
       direction: String(data.get("direction")),
-      leader: CHAIR_NAME,
+      leader: currentAccount.name,
       dueAt: new Date(String(data.get("dueAt"))).toISOString(),
       priority: String(data.get("priority")) as Priority,
       status: "new",
@@ -729,10 +769,18 @@ function App() {
 
   const role = currentAccount.role;
   const availableAccounts = [...accounts, ...registeredAccounts];
+  const managedDirections = directions.filter(
+    (direction) => coordinators[direction] === currentAccount.username,
+  );
+  const canCreateTasks = role === "chair" || managedDirections.length > 0;
   const currentUser = {
     name: currentAccount.name,
     username: currentAccount.username,
-    role: role === "chair" ? "Председатель" : categoryLabel(currentAccount.category),
+    role: role === "chair"
+      ? "Председатель"
+      : managedDirections.length
+        ? `Координатор · ${managedDirections.join(", ")}`
+        : categoryLabel(currentAccount.category),
     initials: currentAccount.initials,
     category: currentAccount.category || "parliament" as ParticipantCategory,
     municipality: currentAccount.municipality || "Луганская Народная Республика",
@@ -956,6 +1004,7 @@ function App() {
           {page === "home" && (
             <Dashboard
               role={role}
+              canCreate={canCreateTasks}
               userName={currentAccount.name}
               tasks={tasks}
               stats={stats}
@@ -967,6 +1016,7 @@ function App() {
           {page === "tasks" && (
             <TasksPage
               role={role}
+              managedDirections={managedDirections}
               userName={currentAccount.name}
               tasks={tasks}
               onTask={setSelectedTask}
@@ -977,7 +1027,11 @@ function App() {
             />
           )}
           {page === "chat" && (
-            <Communication onTask={() => setCreateOpen(true)} />
+            <Communication
+              onTask={() => canCreateTasks
+                ? setCreateOpen(true)
+                : setToast("Создавать поручения могут председатель и координаторы")}
+            />
           )}
           {page === "initiatives" && (
             <InitiativesPage
@@ -998,11 +1052,36 @@ function App() {
               onApply={applyToOpportunity}
             />
           )}
-          {page === "teams" && <TeamsPage accounts={availableAccounts} />}
+          {page === "teams" && (
+            <TeamsPage
+              accounts={availableAccounts}
+              coordinators={coordinators}
+              isChair={role === "chair"}
+              onCoordinator={(direction, username) => {
+                setCoordinators((current) => ({ ...current, [direction]: username }));
+                setToast(username ? "Координатор направления назначен" : "Назначение координатора снято");
+              }}
+            />
+          )}
           {page === "projects" && <ProjectsPage />}
           {page === "calendar" && <CalendarPage tasks={tasks} />}
-          {page === "learning" && <LearningPage />}
+          {page === "learning" && (
+            <LearningPage
+              profile={development[currentAccount.username] || { goal: "", completedChallenges: [] }}
+              onChange={(profile) => setDevelopment((current) => ({ ...current, [currentAccount.username]: profile }))}
+            />
+          )}
           {page === "awards" && <AwardsPage />}
+          {page === "rating" && (
+            <RatingPage
+              accounts={availableAccounts}
+              tasks={tasks}
+              initiatives={initiatives}
+              opportunities={opportunities}
+              development={development}
+              currentUsername={currentAccount.username}
+            />
+          )}
           {page === "analytics" && <AnalyticsPage stats={stats} />}
           {page === "profile" && (
             <ProfilePage
@@ -1021,6 +1100,8 @@ function App() {
         <TaskDrawer
           task={selectedTask}
           role={role}
+          currentName={currentAccount.name}
+          canReview={role === "chair" || managedDirections.includes(selectedTask.direction)}
           onClose={() => setSelectedTask(null)}
           onUpdate={updateTask}
           onSubmit={submitResult}
@@ -1031,6 +1112,8 @@ function App() {
         <CreateTask
           onClose={() => setCreateOpen(false)}
           onSubmit={createTask}
+          accounts={availableAccounts.filter((account) => account.role === "member")}
+          allowedDirections={role === "chair" ? directions : managedDirections}
         />
       )}
       {initiativeOpen && (
@@ -1255,6 +1338,7 @@ function PageTitle({
 
 function Dashboard({
   role,
+  canCreate,
   userName,
   tasks,
   stats,
@@ -1263,6 +1347,7 @@ function Dashboard({
   onNavigate,
 }: {
   role: Role;
+  canCreate: boolean;
   userName: string;
   tasks: Task[];
   stats: { done: number; working: number; review: number; overdue: number };
@@ -1287,7 +1372,7 @@ function Dashboard({
             : "Ваш фокус на сегодня: 3 задачи и одно мероприятие."
         }
         action={
-          role === "chair" && (
+          canCreate && (
             <button className="primary" onClick={onCreate}>
               <Plus size={18} />
               Создать задачу
@@ -1501,6 +1586,7 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
 
 function TasksPage({
   role,
+  managedDirections,
   userName,
   tasks,
   onTask,
@@ -1508,6 +1594,7 @@ function TasksPage({
   onMove,
 }: {
   role: Role;
+  managedDirections: string[];
   userName: string;
   tasks: Task[];
   onTask: (t: Task) => void;
@@ -1515,8 +1602,11 @@ function TasksPage({
   onMove: (id: number, status: TaskStatus) => void;
 }) {
   const [view, setView] = useState("Все задачи");
-  const visible =
-    role === "member" ? tasks.filter((t) => t.assignee === userName) : tasks;
+  const visible = role === "chair"
+    ? tasks
+    : tasks.filter((task) =>
+        task.assignee === userName || managedDirections.includes(task.direction),
+      );
   return (
     <>
       <PageTitle
@@ -1524,7 +1614,7 @@ function TasksPage({
         title="Задачи"
         text="Поручения, сроки и результаты в одном рабочем пространстве."
         action={
-          role === "chair" && (
+          (role === "chair" || managedDirections.length > 0) && (
             <button className="primary" onClick={onCreate}>
               <Plus size={18} />
               Создать задачу
@@ -1624,6 +1714,8 @@ function TasksPage({
 function TaskDrawer({
   task,
   role,
+  currentName,
+  canReview,
   onClose,
   onUpdate,
   onSubmit,
@@ -1631,6 +1723,8 @@ function TaskDrawer({
 }: {
   task: Task;
   role: Role;
+  currentName: string;
+  canReview: boolean;
   onClose: () => void;
   onUpdate: (id: number, patch: Partial<Task>, message?: string) => void;
   onSubmit: (t: Task) => void;
@@ -1738,7 +1832,7 @@ function TaskDrawer({
           </div>
         )}
         <footer className="drawer-actions">
-          {role === "member" && task.status === "new" && (
+          {role === "member" && task.assignee === currentName && task.status === "new" && (
             <button
               className="primary wide"
               onClick={() =>
@@ -1752,7 +1846,7 @@ function TaskDrawer({
               Принять задачу
             </button>
           )}
-          {role === "member" && task.status === "accepted" && (
+          {role === "member" && task.assignee === currentName && task.status === "accepted" && (
             <button
               className="primary wide"
               onClick={() =>
@@ -1766,7 +1860,7 @@ function TaskDrawer({
               Начать работу
             </button>
           )}
-          {role === "member" && task.status === "working" && (
+          {role === "member" && task.assignee === currentName && task.status === "working" && (
             <>
               <button className="secondary">
                 <Upload size={17} />
@@ -1777,7 +1871,7 @@ function TaskDrawer({
               </button>
             </>
           )}
-          {role === "chair" && task.status === "review" && (
+          {canReview && task.status === "review" && (
             <>
               <button
                 className="secondary danger"
@@ -1816,9 +1910,13 @@ function TaskDrawer({
 function CreateTask({
   onClose,
   onSubmit,
+  accounts: availableAccounts,
+  allowedDirections,
 }: {
   onClose: () => void;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  accounts: Account[];
+  allowedDirections: string[];
 }) {
   const defaultDue = new Date(Date.now() + 48 * 3_600_000);
   defaultDue.setMinutes(0);
@@ -1847,18 +1945,20 @@ function CreateTask({
           <label>
             Исполнитель
             <select name="assignee">
-              {members.map((member) => (
-                <option key={member}>{member}</option>
+              {availableAccounts.map((account) => (
+                <option key={account.username} value={account.name}>
+                  {account.name} · {categoryLabel(account.category)}
+                </option>
               ))}
             </select>
           </label>
           <label>
             Муниципалитет
             <select name="municipality">
-              <option>Луганск</option>
-              <option>Алчевск</option>
-              <option>Краснодон</option>
-              <option>Свердловск</option>
+              <option>Луганская Народная Республика</option>
+              {municipalities.map((municipality) => (
+                <option key={municipality}>{municipality}</option>
+              ))}
             </select>
           </label>
           <label>
@@ -1872,10 +1972,9 @@ function CreateTask({
           <label>
             Направление
             <select name="direction">
-              <option>Правовое просвещение</option>
-              <option>Проектное управление</option>
-              <option>Аналитика</option>
-              <option>Мероприятия</option>
+              {allowedDirections.map((direction) => (
+                <option key={direction}>{direction}</option>
+              ))}
             </select>
           </label>
           <label className="full">
@@ -2260,7 +2359,17 @@ function OpportunityDialog({
   );
 }
 
-function TeamsPage({ accounts }: { accounts: Account[] }) {
+function TeamsPage({
+  accounts,
+  coordinators,
+  isChair,
+  onCoordinator,
+}: {
+  accounts: Account[];
+  coordinators: Record<string, string>;
+  isChair: boolean;
+  onCoordinator: (direction: string, username: string) => void;
+}) {
   const [categoryFilter, setCategoryFilter] = useState<"all" | ParticipantCategory>("all");
   const visibleAccounts = categoryFilter === "all" ? accounts : accounts.filter((account) => (account.category || "parliament") === categoryFilter);
   return (
@@ -2276,6 +2385,37 @@ function TeamsPage({ accounts }: { accounts: Account[] }) {
           </button>
         }
       />
+      <section className="panel coordinators-panel">
+        <div className="panel-head">
+          <div>
+            <span className="eyebrow">Лидерский контур</span>
+            <h3>Координаторы направлений</h3>
+          </div>
+          <small>{isChair ? "Назначения доступны председателю" : "Ответственные за работу направлений"}</small>
+        </div>
+        <div className="coordinator-grid">
+          {directions.map((direction) => {
+            const coordinator = accounts.find((account) => account.username === coordinators[direction]);
+            return (
+              <article key={direction}>
+                <span><Target /></span>
+                <div>
+                  <small>{direction}</small>
+                  <strong>{coordinator?.name || "Координатор не назначен"}</strong>
+                </div>
+                {isChair ? (
+                  <select value={coordinators[direction] || ""} onChange={(event) => onCoordinator(direction, event.target.value)}>
+                    <option value="">Не назначен</option>
+                    {accounts.filter((account) => account.role === "member").map((account) => (
+                      <option key={account.username} value={account.username}>{account.name}</option>
+                    ))}
+                  </select>
+                ) : coordinator ? <ShieldCheck /> : null}
+              </article>
+            );
+          })}
+        </div>
+      </section>
       <div className="cards-grid">
         {[
           ["Команда #ЗнайСвоиПрава", "12 участников", "64%"],
@@ -2327,7 +2467,7 @@ function TeamsPage({ accounts }: { accounts: Account[] }) {
               <div>
                 <strong>{account.name}</strong>
                 <small>
-                  {account.role === "chair" ? "Председатель · " : ""}{categoryLabel(account.category)}
+                  {account.role === "chair" ? "Председатель · " : Object.values(coordinators).includes(account.username) ? "Координатор · " : ""}{categoryLabel(account.category)}
                 </small>
                 {account.category === "municipal" && <small className="roster-municipality">{account.municipality}</small>}
               </div>
@@ -2480,7 +2620,20 @@ function CalendarPage({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function LearningPage() {
+const developmentChallenges = [
+  { id: "problem", title: "Опишите проблему муниципалитета", skill: "Аналитика", points: 30 },
+  { id: "speech", title: "Запишите трёхминутное выступление", skill: "Публичная речь", points: 30 },
+  { id: "team", title: "Проведите короткую встречу команды", skill: "Лидерство", points: 30 },
+  { id: "feedback", title: "Дайте конструктивную обратную связь", skill: "Коммуникации", points: 30 },
+];
+
+function LearningPage({
+  profile,
+  onChange,
+}: {
+  profile: DevelopmentProfile;
+  onChange: (profile: DevelopmentProfile) => void;
+}) {
   return (
     <>
       <PageTitle
@@ -2507,6 +2660,44 @@ function LearningPage() {
           <strong>08</strong>
           <span>день из 30</span>
         </div>
+      </div>
+      <div className="development-workspace">
+        <section className="panel development-goal">
+          <span className="eyebrow">Мой ориентир</span>
+          <h3>Цель развития на 30 дней</h3>
+          <textarea
+            value={profile.goal}
+            onChange={(event) => onChange({ ...profile, goal: event.target.value })}
+            placeholder="Например: научиться уверенно презентовать проект перед аудиторией"
+            rows={3}
+          />
+          <small>Цель сохраняется автоматически и помогает выбирать практику.</small>
+        </section>
+        <section className="panel challenge-panel">
+          <div className="panel-head">
+            <div><span className="eyebrow">Практика недели</span><h3>Челленджи навыков</h3></div>
+            <strong>{profile.completedChallenges.length}/{developmentChallenges.length}</strong>
+          </div>
+          {developmentChallenges.map((challenge) => {
+            const completed = profile.completedChallenges.includes(challenge.id);
+            return (
+              <button
+                className={completed ? "completed" : ""}
+                key={challenge.id}
+                onClick={() => onChange({
+                  ...profile,
+                  completedChallenges: completed
+                    ? profile.completedChallenges.filter((id) => id !== challenge.id)
+                    : [...profile.completedChallenges, challenge.id],
+                })}
+              >
+                <span>{completed ? <Check /> : <Zap />}</span>
+                <div><strong>{challenge.title}</strong><small>{challenge.skill}</small></div>
+                <b>+{challenge.points}</b>
+              </button>
+            );
+          })}
+        </section>
       </div>
       <h2 className="section-heading">Учебные модули</h2>
       <div className="module-grid">
@@ -2536,6 +2727,87 @@ function LearningPage() {
           </button>
         ))}
       </div>
+    </>
+  );
+}
+
+function RatingPage({
+  accounts,
+  tasks,
+  initiatives,
+  opportunities,
+  development,
+  currentUsername,
+}: {
+  accounts: Account[];
+  tasks: Task[];
+  initiatives: Initiative[];
+  opportunities: Opportunity[];
+  development: Record<string, DevelopmentProfile>;
+  currentUsername: string;
+}) {
+  const [category, setCategory] = useState<"all" | ParticipantCategory>("all");
+  const rows = accounts.map((account) => {
+    const taskPoints = tasks
+      .filter((task) => task.assignee === account.name && task.status === "done")
+      .reduce((sum, task) => sum + task.xp, 0);
+    const authored = initiatives.filter((initiative) => initiative.author === account.name);
+    const initiativePoints = authored.length * 120
+      + authored.filter((initiative) => initiative.status === "done").length * 200
+      + authored.reduce((sum, initiative) => sum + initiative.votes.filter((username) => username !== account.username).length * 10, 0);
+    const communityPoints = initiatives.filter((initiative) => initiative.votes.includes(account.username) && initiative.author !== account.name).length * 5;
+    const opportunityPoints = opportunities.filter((opportunity) => opportunity.applications.some((application) => application.username === account.username)).length * 40;
+    const learningPoints = (development[account.username]?.completedChallenges.length || 0) * 30;
+    return {
+      account,
+      taskPoints,
+      initiativePoints,
+      communityPoints,
+      opportunityPoints,
+      learningPoints,
+      total: taskPoints + initiativePoints + communityPoints + opportunityPoints + learningPoints,
+    };
+  }).sort((a, b) => b.total - a.total || a.account.name.localeCompare(b.account.name));
+  const visible = category === "all" ? rows : rows.filter((row) => (row.account.category || "parliament") === category);
+
+  return (
+    <>
+      <PageTitle
+        eyebrow="Открытые правила"
+        title="Рейтинг участников"
+        text="Баллы рассчитываются автоматически из подтверждённых действий в экосистеме."
+      />
+      <section className="rating-formula">
+        <div><CheckCircle2 /><strong>Задачи</strong><span>Фактический XP только за принятый результат</span></div>
+        <div><Lightbulb /><strong>Инициативы</strong><span>+120 за идею, +200 за реализацию, +10 за голос</span></div>
+        <div><BookOpen /><strong>Развитие</strong><span>+30 за выполненный практический челлендж</span></div>
+        <div><Activity /><strong>Активность</strong><span>+40 за заявку, +5 за поддержку чужой идеи</span></div>
+      </section>
+      <div className="rating-toolbar">
+        <div className="tabs">
+          <button className={category === "all" ? "active" : ""} onClick={() => setCategory("all")}>Все</button>
+          {participantCategories.map((item) => (
+            <button key={item.id} className={category === item.id ? "active" : ""} onClick={() => setCategory(item.id)}>{item.label}</button>
+          ))}
+        </div>
+        <small>Обновляется после каждого подтверждённого действия</small>
+      </div>
+      <section className="panel rating-table">
+        <header><span>Место и участник</span><span>Задачи</span><span>Инициативы</span><span>Развитие</span><span>Активность</span><span>Итого</span></header>
+        {visible.map((row) => {
+          const place = rows.findIndex((item) => item.account.username === row.account.username) + 1;
+          return (
+            <article className={row.account.username === currentUsername ? "current" : ""} key={row.account.username}>
+              <div><b>{place}</b><span className="mini-avatar">{row.account.initials}</span><p><strong>{row.account.name}</strong><small>{categoryLabel(row.account.category)}</small></p></div>
+              <span>{row.taskPoints}</span>
+              <span>{row.initiativePoints}</span>
+              <span>{row.learningPoints}</span>
+              <span>{row.communityPoints + row.opportunityPoints}</span>
+              <strong>{row.total}</strong>
+            </article>
+          );
+        })}
+      </section>
     </>
   );
 }
